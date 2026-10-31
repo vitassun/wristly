@@ -1,0 +1,6 @@
+# Copy to .dev.vars locally. Never commit real values.
+APP_ACCESS_TOKEN=
+LLM_API_KEY=
+SEARCH_API_KEY=
+ASR_APP_ID=
+ASR_ACCESS_TOKEN=

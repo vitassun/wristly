@@ -1,0 +1,16 @@
+name = "wristly"
+main = "src/index.ts"
+compatibility_date = "2026-10-01"
+
+[vars]
+LLM_BASE_URL = "https://api.openai.com/v1"
+LLM_MODEL = "gpt-4.1-mini"
+ASR_RESOURCE_ID = "volc.bigasr.sauc.duration"
+
+[[durable_objects.bindings]]
+name = "RATE_LIMITER"
+class_name = "RateLimiter"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["RateLimiter"]
