@@ -1,5 +1,9 @@
 # MVP 验证记录
 
+后续配置调整（PR #2）：默认 DeepSeek + Tavily；豆包改为一句话识别 2.0（`bigmodel_nostream`、`volc.seedasr.sauc.duration`），支持新控制台单个 `ASR_API_KEY`。按用户要求显式启用免私人令牌模式，保留全局限流；配置 `APP_ACCESS_TOKEN` 后仍要求私人鉴权。公开地址可被他人调用并消耗上游额度。
+
+该调整已在 Linux 上通过 TypeScript 检查、20 项后端测试及 Wrangler dry run；新增 Watch 请求测试覆盖免令牌与私人令牌两种请求方式。以下原始 MVP 的 CI 记录保留作历史证据，最新构建结果以 PR 检查为准。真实上游调用仍需用户配置密钥验证。
+
 开发环境：Codex Cloud Linux，Node.js 24.19.0；没有 Xcode 或 Swift 编译器。
 
 已在当前环境实际完成：

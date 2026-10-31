@@ -3,6 +3,22 @@ import XCTest
 @testable import WristlyCore
 
 final class CoreTests: XCTestCase {
+    func testPublicConnectionOmitsAuthorizationForChatAndVoice() {
+        let connection = Connection(baseURL: URL(string: "https://worker.example")!, token: "")
+        let chat = connection.request("chat")
+        let voice = connection.request("asr", websocket: true)
+        XCTAssertEqual(chat.url?.absoluteString, "https://worker.example/chat")
+        XCTAssertNil(chat.value(forHTTPHeaderField: "Authorization"))
+        XCTAssertEqual(voice.url?.absoluteString, "wss://worker.example/asr")
+        XCTAssertNil(voice.value(forHTTPHeaderField: "Authorization"))
+    }
+    func testPrivateConnectionSendsTokenOnlyInHeader() {
+        let connection = Connection(baseURL: URL(string: "https://worker.example")!, token: "private-test-token")
+        for request in [connection.request("chat"), connection.request("asr", websocket: true)] {
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer private-test-token")
+            XCTAssertFalse(request.url!.absoluteString.contains("private-test-token"))
+        }
+    }
     func testSSEFrameWithCommentsAndCRLF() throws {
         var parser = SSEDecoder()
         XCTAssertNil(try parser.line(": heartbeat\r"))

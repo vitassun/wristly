@@ -1,11 +1,13 @@
 export interface Env {
-  APP_ACCESS_TOKEN: string;
+  APP_ACCESS_TOKEN?: string;
+  ALLOW_UNAUTHENTICATED?: string;
   LLM_API_KEY: string;
   LLM_BASE_URL: string;
   LLM_MODEL: string;
   SEARCH_API_KEY: string;
-  ASR_APP_ID: string;
-  ASR_ACCESS_TOKEN: string;
+  ASR_API_KEY?: string;
+  ASR_APP_ID?: string;
+  ASR_ACCESS_TOKEN?: string;
   ASR_RESOURCE_ID: string;
   RATE_LIMITER: DurableObjectNamespace;
 }

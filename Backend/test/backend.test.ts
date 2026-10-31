@@ -5,6 +5,7 @@ import worker, { authorized, RateLimiter } from "../src/index.ts";
 import { chat, history, search } from "../src/chat.ts";
 import { readJSON, sseData } from "../src/http.ts";
 import { decodeFrame, frame, initFrame } from "../src/asr-protocol.ts";
+import { asrConnection } from "../src/asr.ts";
 import type { Env, Fetcher } from "../src/types.ts";
 
 const token = "unit-test-token-with-at-least-32-characters";
@@ -156,6 +157,46 @@ test("ASR rejects error frames and truncated payloads", async () => {
   await assert.rejects(decodeFrame(new Uint8Array([0x11, 0xf0, 0x10, 0, 0, 0, 0, 1]).buffer), /返回错误/);
   await assert.rejects(decodeFrame(new Uint8Array([0x11, 0x90, 0x10, 0, 0, 0, 0, 2]).buffer), /长度/);
   await assert.rejects(decodeFrame(new ArrayBuffer(1)), /无效/);
+});
+
+test("ASR 2.0 uses sentence endpoint, resource and API Key; legacy credentials remain supported", () => {
+  const settings = { ...env, ASR_RESOURCE_ID: "volc.seedasr.sauc.duration", ASR_API_KEY: "test-asr-key" };
+  const config = asrConnection(settings);
+  assert.equal(config.url, "https://openspeech.bytedance.com/api/v3/sauc/bigmodel_nostream");
+  assert.equal(config.headers["X-Api-Resource-Id"], "volc.seedasr.sauc.duration");
+  assert.equal(config.headers["X-Api-Key"], "test-asr-key");
+  assert.match(config.headers["X-Api-Request-Id"], /^[0-9a-f-]{36}$/);
+  assert.equal(config.headers["X-Api-App-Key"], undefined);
+  const legacy = asrConnection({ ...settings, ASR_API_KEY: "", ASR_APP_ID: "test-app", ASR_ACCESS_TOKEN: "test-access" });
+  assert.equal(legacy.headers["X-Api-App-Key"], "test-app");
+  assert.equal(legacy.headers["X-Api-Access-Key"], "test-access");
+  assert.throws(() => asrConnection({ ...env, ASR_APP_ID: "app-only" }), /API Key/);
+});
+
+test("ASR decodes an optional event field without confusing it with payload length", async () => {
+  const payload = encoder.encode(JSON.stringify({ result: { text: "一句话结果" } }));
+  const bytes = new Uint8Array(16 + payload.length);
+  bytes.set([0x11, 0x97, 0x10, 0]);
+  const view = new DataView(bytes.buffer);
+  view.setInt32(4, -1); view.setInt32(8, 0); view.setUint32(12, payload.length);
+  bytes.set(payload, 16);
+  assert.deepEqual(await decodeFrame(bytes.buffer), { text: "一句话结果", final: true });
+});
+
+test("public mode requires explicit opt-in, retains rate limits, and never overrides a configured token", async () => {
+  let limited = false;
+  const publicEnv = { ...env, APP_ACCESS_TOKEN: undefined, ALLOW_UNAUTHENTICATED: "true",
+    RATE_LIMITER: { idFromName: () => ({}), get: () => ({ fetch: async () => new Response("{}", { status: limited ? 429 : 200 }) }) }
+  } as unknown as Env;
+  const request = (authorization?: string) => new Request("https://worker/chat", { method: "POST",
+    headers: { "Content-Type": "application/json", ...(authorization ? { Authorization: authorization } : {}) }, body: '{"messages":[]}' });
+  assert.equal((await worker.fetch(request(), publicEnv)).status, 400);
+  assert.equal((await worker.fetch(request(), { ...publicEnv, ALLOW_UNAUTHENTICATED: undefined })).status, 503);
+  assert.equal((await worker.fetch(request(), { ...publicEnv, APP_ACCESS_TOKEN: token })).status, 401);
+  assert.equal((await worker.fetch(request("Bearer wrong"), { ...publicEnv, APP_ACCESS_TOKEN: token })).status, 401);
+  assert.equal((await worker.fetch(request(`Bearer ${token}`), { ...publicEnv, APP_ACCESS_TOKEN: token })).status, 400);
+  limited = true;
+  assert.equal((await worker.fetch(request(), publicEnv)).status, 429);
 });
 
 test("routes fail closed, require secrets and bound JSON before model fetch", async () => {

@@ -1,13 +1,24 @@
 import { APIError, type Env } from "./types.ts";
 import { decodeFrame, frame, initFrame } from "./asr-protocol.ts";
 
+export function asrConnection(env: Env): { url: string; headers: Record<string, string> } {
+  const id = crypto.randomUUID();
+  const headers: Record<string, string> = {
+    Upgrade: "websocket", "X-Api-Resource-Id": env.ASR_RESOURCE_ID,
+    "X-Api-Request-Id": id, "X-Api-Connect-Id": id
+  };
+  if (env.ASR_API_KEY) headers["X-Api-Key"] = env.ASR_API_KEY;
+  else if (env.ASR_APP_ID && env.ASR_ACCESS_TOKEN) {
+    headers["X-Api-App-Key"] = env.ASR_APP_ID;
+    headers["X-Api-Access-Key"] = env.ASR_ACCESS_TOKEN;
+  } else throw new APIError(503, "尚未配置豆包语音 API Key");
+  return { url: "https://openspeech.bytedance.com/api/v3/sauc/bigmodel_nostream", headers };
+}
+
 export async function asr(env: Env): Promise<Response> {
-  const response = await fetch("https://openspeech.bytedance.com/api/v3/sauc/bigmodel", {
-    headers: {
-      Upgrade: "websocket", "X-Api-App-Key": env.ASR_APP_ID,
-      "X-Api-Access-Key": env.ASR_ACCESS_TOKEN,
-      "X-Api-Resource-Id": env.ASR_RESOURCE_ID, "X-Api-Connect-Id": crypto.randomUUID()
-    }, signal: AbortSignal.timeout(10_000), redirect: "error"
+  const config = asrConnection(env);
+  const response = await fetch(config.url, {
+    headers: config.headers, signal: AbortSignal.timeout(10_000), redirect: "error"
   });
   const upstream = response.webSocket;
   if (response.status !== 101 || !upstream) throw new APIError(502, "无法连接豆包语音服务，请检查后端配置");
