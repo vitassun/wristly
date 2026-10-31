@@ -1,0 +1,65 @@
+name: Wristly CI
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: Backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: Backend/package-lock.json
+      - run: npm ci
+      - run: npm run check 2>&1 | tee typecheck.log
+      - run: npm test 2>&1 | tee tests.log
+      - run: npm run build 2>&1 | tee bundle.log
+        env:
+          WRANGLER_SEND_METRICS: 'false'
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: backend-validation
+          path: |
+            Backend/*.log
+            Backend/dist/
+          retention-days: 7
+
+  watch:
+    # Official runner-images Xcode 27 public preview image, containing watchOS 27.
+    # A compatible self-hosted runner label can be supplied via WATCHOS_RUNNER.
+    runs-on: ${{ vars.WATCHOS_RUNNER || 'xcode-27' }}
+    timeout-minutes: 25
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_27.app/Contents/Developer
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install XcodeGen
+        run: command -v xcodegen || brew install xcodegen
+      - name: Core tests and unsigned watchOS simulator build
+        run: bash scripts/build-watch.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: watch-build-and-logs
+          path: |
+            build/*.log
+            build/*.zip
+            build/*.xcresult
+            Wristly.xcodeproj/
+          retention-days: 7

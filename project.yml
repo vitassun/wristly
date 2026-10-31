@@ -1,0 +1,35 @@
+name: Wristly
+options:
+  minimumXcodeGenVersion: 2.44.1
+  xcodeVersion: "27.0"
+  deploymentTarget:
+    watchOS: "27.0"
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    SWIFT_STRICT_CONCURRENCY: complete
+    CODE_SIGN_STYLE: Automatic
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+targets:
+  Wristly:
+    type: application
+    platform: watchOS
+    sources:
+      - path: WatchApp
+        excludes: ["Resources/Info.plist"]
+    info:
+      path: WatchApp/Resources/Info.plist
+      properties:
+        CFBundleDisplayName: Wristly
+        WKApplication: true
+        WKWatchOnly: true
+        NSMicrophoneUsageDescription: 将你说的问题发送到私人后端，通过豆包识别为可编辑文字。
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.wristly.watchapp
+        SDKROOT: watchos
+        TARGETED_DEVICE_FAMILY: "4"
+        GENERATE_INFOPLIST_FILE: YES
+    scheme:
+      gatherCoverageData: false
