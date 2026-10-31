@@ -1,6 +1,6 @@
 # Copy to .dev.vars locally. Never commit real values.
+# Optional: set APP_ACCESS_TOKEN to enable private authentication.
 APP_ACCESS_TOKEN=
 LLM_API_KEY=
 SEARCH_API_KEY=
-ASR_APP_ID=
-ASR_ACCESS_TOKEN=
+ASR_API_KEY=

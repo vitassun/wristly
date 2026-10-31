@@ -5,6 +5,7 @@ import worker, { authorized, RateLimiter } from "../src/index.ts";
 import { chat, history, search } from "../src/chat.ts";
 import { readJSON, sseData } from "../src/http.ts";
 import { decodeFrame, frame, initFrame } from "../src/asr-protocol.ts";
+import { asrConnection } from "../src/asr.ts";
 import type { Env, Fetcher } from "../src/types.ts";
 
 const token = "unit-test-token-with-at-least-32-characters";
@@ -70,6 +71,7 @@ test("chat streams deltas and ends exactly once", async () => {
   const result = await events(chat([{ role: "user", content: "你好" }], env, new AbortController().signal,
     fetcher((_url, init) => {
       assert.equal((init?.headers as Record<string, string>).Authorization, "Bearer test-llm");
+      assert.equal(JSON.parse(String(init?.body)).thinking, undefined);
       return new Response(frames(delta("你好"), delta("！"), "[DONE]"));
     })));
   assert.deepEqual(result.map(e => e.name), ["delta", "delta", "done"]);
@@ -79,13 +81,18 @@ test("chat streams deltas and ends exactly once", async () => {
 test("fragmented tool call searches once, returns sources, then streams grounded answer", async () => {
   let models = 0, searches = 0;
   const mock = fetcher((url, init) => {
-    if (url.startsWith("https://api.search.brave.com")) {
+    if (url === "https://api.tavily.com/search") {
       searches++;
-      assert.equal(new URL(url).searchParams.get("q"), "今日新闻");
-      return Response.json({ web: { results: [{ title: "来源", url: "https://news.example/1", description: "摘要" }, { title: "bad", url: "javascript:alert(1)" }] } });
+      assert.equal(init?.method, "POST");
+      assert.equal((init?.headers as Record<string, string>).Authorization, "Bearer test-search");
+      assert.deepEqual(JSON.parse(String(init?.body)), { query: "今日新闻", search_depth: "basic", max_results: 5, include_answer: false, include_raw_content: false });
+      return Response.json({ results: [{ title: "来源", url: "https://news.example/1", content: "摘要" }, { title: "bad", url: "javascript:alert(1)" }] });
     }
     models++;
     const input = JSON.parse(String(init?.body));
+    assert.equal(url, "https://api.deepseek.com/chat/completions");
+    assert.equal(input.model, "deepseek-flash");
+    assert.deepEqual(input.thinking, { type: "disabled" });
     if (models === 1) return new Response(frames(
       { choices: [{ delta: { tool_calls: [{ index: 0, id: "call_1", function: { name: "web_search", arguments: '{"query":"今日' } }] } }] },
       { choices: [{ delta: { tool_calls: [{ index: 0, function: { arguments: '新闻"}' } }] } }] }, "[DONE]"));
@@ -94,10 +101,11 @@ test("fragmented tool call searches once, returns sources, then streams grounded
     assert.match(input.messages.at(-1).content, /news.example/);
     return new Response(frames(delta("根据[来源](https://news.example/1)…"), "[DONE]"));
   });
-  const result = await events(chat([{ role: "user", content: "今天有什么新闻" }], env, new AbortController().signal, mock));
+  const result = await events(chat([{ role: "user", content: "今天有什么新闻" }], { ...env, LLM_BASE_URL: "https://api.deepseek.com", LLM_MODEL: "deepseek-flash" }, new AbortController().signal, mock));
   assert.equal(models, 2); assert.equal(searches, 1);
   assert.deepEqual(result.map(e => e.name), ["status", "sources", "delta", "done"]);
   assert.equal(result[1].data.sources.length, 1);
+  assert.equal(result[1].data.sources[0].snippet, "摘要");
 });
 
 test("upstream HTTP errors and premature EOF produce error, never done", async () => {
@@ -149,6 +157,46 @@ test("ASR rejects error frames and truncated payloads", async () => {
   await assert.rejects(decodeFrame(new Uint8Array([0x11, 0xf0, 0x10, 0, 0, 0, 0, 1]).buffer), /返回错误/);
   await assert.rejects(decodeFrame(new Uint8Array([0x11, 0x90, 0x10, 0, 0, 0, 0, 2]).buffer), /长度/);
   await assert.rejects(decodeFrame(new ArrayBuffer(1)), /无效/);
+});
+
+test("ASR 2.0 uses sentence endpoint, resource and API Key; legacy credentials remain supported", () => {
+  const settings = { ...env, ASR_RESOURCE_ID: "volc.seedasr.sauc.duration", ASR_API_KEY: "test-asr-key" };
+  const config = asrConnection(settings);
+  assert.equal(config.url, "https://openspeech.bytedance.com/api/v3/sauc/bigmodel_nostream");
+  assert.equal(config.headers["X-Api-Resource-Id"], "volc.seedasr.sauc.duration");
+  assert.equal(config.headers["X-Api-Key"], "test-asr-key");
+  assert.match(config.headers["X-Api-Request-Id"], /^[0-9a-f-]{36}$/);
+  assert.equal(config.headers["X-Api-App-Key"], undefined);
+  const legacy = asrConnection({ ...settings, ASR_API_KEY: "", ASR_APP_ID: "test-app", ASR_ACCESS_TOKEN: "test-access" });
+  assert.equal(legacy.headers["X-Api-App-Key"], "test-app");
+  assert.equal(legacy.headers["X-Api-Access-Key"], "test-access");
+  assert.throws(() => asrConnection({ ...env, ASR_APP_ID: "app-only" }), /API Key/);
+});
+
+test("ASR decodes an optional event field without confusing it with payload length", async () => {
+  const payload = encoder.encode(JSON.stringify({ result: { text: "一句话结果" } }));
+  const bytes = new Uint8Array(16 + payload.length);
+  bytes.set([0x11, 0x97, 0x10, 0]);
+  const view = new DataView(bytes.buffer);
+  view.setInt32(4, -1); view.setInt32(8, 0); view.setUint32(12, payload.length);
+  bytes.set(payload, 16);
+  assert.deepEqual(await decodeFrame(bytes.buffer), { text: "一句话结果", final: true });
+});
+
+test("public mode requires explicit opt-in, retains rate limits, and never overrides a configured token", async () => {
+  let limited = false;
+  const publicEnv = { ...env, APP_ACCESS_TOKEN: undefined, ALLOW_UNAUTHENTICATED: "true",
+    RATE_LIMITER: { idFromName: () => ({}), get: () => ({ fetch: async () => new Response("{}", { status: limited ? 429 : 200 }) }) }
+  } as unknown as Env;
+  const request = (authorization?: string) => new Request("https://worker/chat", { method: "POST",
+    headers: { "Content-Type": "application/json", ...(authorization ? { Authorization: authorization } : {}) }, body: '{"messages":[]}' });
+  assert.equal((await worker.fetch(request(), publicEnv)).status, 400);
+  assert.equal((await worker.fetch(request(), { ...publicEnv, ALLOW_UNAUTHENTICATED: undefined })).status, 503);
+  assert.equal((await worker.fetch(request(), { ...publicEnv, APP_ACCESS_TOKEN: token })).status, 401);
+  assert.equal((await worker.fetch(request("Bearer wrong"), { ...publicEnv, APP_ACCESS_TOKEN: token })).status, 401);
+  assert.equal((await worker.fetch(request(`Bearer ${token}`), { ...publicEnv, APP_ACCESS_TOKEN: token })).status, 400);
+  limited = true;
+  assert.equal((await worker.fetch(request(), publicEnv)).status, 429);
 });
 
 test("routes fail closed, require secrets and bound JSON before model fetch", async () => {

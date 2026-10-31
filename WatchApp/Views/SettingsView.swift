@@ -7,12 +7,12 @@ struct SettingsView: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("私人后端") {
+                Section("后端连接") {
                     TextField("https://…workers.dev", text: $settings.endpoint)
                         .textInputAutocapitalization(.never).autocorrectionDisabled()
-                    SecureField("访问令牌", text: $settings.token)
+                    SecureField("访问令牌（可选）", text: $settings.token)
                         .textInputAutocapitalization(.never).autocorrectionDisabled()
-                    Text("令牌保存在本机钥匙串。模型与语音密钥只在后端配置。")
+                    Text("默认只需填写后端地址。启用私人令牌时再填写，令牌保存在本机钥匙串。")
                         .font(.footnote).foregroundStyle(.secondary)
                 }
                 if let error { Text(error).font(.footnote).foregroundStyle(.orange) }

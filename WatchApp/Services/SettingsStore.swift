@@ -2,22 +2,6 @@ import Foundation
 import Security
 import SwiftUI
 
-struct Connection: Sendable {
-    var baseURL: URL
-    var token: String
-    func request(_ path: String, websocket: Bool = false) -> URLRequest {
-        var url = baseURL.appendingPathComponent(path)
-        if websocket {
-            var parts = URLComponents(url: url, resolvingAgainstBaseURL: false)!
-            parts.scheme = "wss"
-            url = parts.url!
-        }
-        var request = URLRequest(url: url)
-        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        return request
-    }
-}
-
 @MainActor
 final class SettingsStore: ObservableObject {
     @Published var endpoint: String
@@ -41,7 +25,7 @@ final class SettingsStore: ObservableObject {
               parts.path.isEmpty || parts.path == "/", let url = parts.url else {
             throw ClientError.message("请输入 HTTPS 后端地址，例如 https://wristly.example.workers.dev")
         }
-        guard (32...256).contains(token.utf8.count) else { throw ClientError.message("请输入 32–256 字节的私人访问令牌") }
+        guard token.isEmpty || (32...256).contains(token.utf8.count) else { throw ClientError.message("令牌可留空；填写时需为 32–256 字节") }
         return Connection(baseURL: url, token: token)
     }
 
@@ -49,6 +33,12 @@ final class SettingsStore: ObservableObject {
         _ = try connection()
         let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
                                    kSecAttrService as String: Self.account, kSecAttrAccount as String: "owner"]
+        if token.isEmpty {
+            let status = SecItemDelete(query as CFDictionary)
+            guard status == errSecSuccess || status == errSecItemNotFound else { throw ClientError.message("无法清除旧令牌") }
+            UserDefaults.standard.set(endpoint.trimmingCharacters(in: .whitespacesAndNewlines), forKey: "backendURL")
+            return
+        }
         let attributes: [String: Any] = [kSecValueData as String: Data(token.utf8),
                                        kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlockedThisDeviceOnly]
         let update = SecItemUpdate(query as CFDictionary, attributes as CFDictionary)

@@ -3,7 +3,7 @@ import { readJSON } from "./http.ts";
 import { chat, history } from "./chat.ts";
 import { asr } from "./asr.ts";
 
-export async function authorized(request: Request, token: string): Promise<boolean> {
+export async function authorized(request: Request, token?: string): Promise<boolean> {
   if (!token || token.length < 32) return false;
   const supplied = request.headers.get("Authorization") ?? "";
   if (supplied.length > 300) return false;
@@ -20,7 +20,11 @@ export default {
     try {
       const path = new URL(request.url).pathname;
       if (path === "/health" && request.method === "GET") return Response.json({ status: "ok" });
-      if (!await authorized(request, env.APP_ACCESS_TOKEN)) throw new APIError(401, "访问令牌无效");
+      if (env.APP_ACCESS_TOKEN) {
+        if (!await authorized(request, env.APP_ACCESS_TOKEN)) throw new APIError(401, "访问令牌无效");
+      } else if (env.ALLOW_UNAUTHENTICATED !== "true") {
+        throw new APIError(503, "尚未配置访问方式");
+      }
       if (!((path === "/chat" && request.method === "POST") || (path === "/asr" && request.method === "GET"))) {
         throw new APIError(404, "接口不存在");
       }
@@ -32,7 +36,6 @@ export default {
         return chat(history(await readJSON(request)), env, request.signal);
       }
       if (request.headers.get("Upgrade")?.toLowerCase() !== "websocket") throw new APIError(426, "需要 WebSocket");
-      if (!env.ASR_APP_ID || !env.ASR_ACCESS_TOKEN) throw new APIError(503, "尚未配置豆包语音服务");
       return await asr(env);
     } catch (error) {
       return Response.json({ error: error instanceof APIError ? error.message : "后端服务暂不可用" },

@@ -24,6 +24,7 @@ export async function decodeFrame(data: ArrayBuffer): Promise<{ text?: string; f
   if (type === 15) throw new APIError(502, "豆包识别服务返回错误，请检查后端凭证及资源授权");
   if (type !== 9) throw new APIError(502, "未知语音响应");
   if (flags & 1) offset += 4; // sequence field
+  if (flags & 4) offset += 4; // optional event field in the v3 protocol
   if (offset + 4 > b.length) throw new APIError(502, "语音响应截断");
   const length = view.getUint32(offset); offset += 4;
   if (length !== b.length - offset) throw new APIError(502, "语音响应长度错误");

@@ -3,9 +3,11 @@ main = "src/index.ts"
 compatibility_date = "2026-10-01"
 
 [vars]
-LLM_BASE_URL = "https://api.openai.com/v1"
-LLM_MODEL = "gpt-4.1-mini"
-ASR_RESOURCE_ID = "volc.bigasr.sauc.duration"
+LLM_BASE_URL = "https://api.deepseek.com"
+LLM_MODEL = "deepseek-flash"
+ASR_RESOURCE_ID = "volc.seedasr.sauc.duration"
+# Explicit opt-in: requests do not need a private token unless one is configured.
+ALLOW_UNAUTHENTICATED = "true"
 
 [[durable_objects.bindings]]
 name = "RATE_LIMITER"
