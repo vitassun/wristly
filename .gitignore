@@ -1,0 +1,15 @@
+node_modules/
+.wrangler/
+.dev.vars
+.env
+dist/
+.DS_Store
+DerivedData/
+*.xcuserstate
+xcuserdata/
+WatchApp/Local.xcconfig
+*.xcodeproj/
+*.xcresult/
+build/
+.build/
+*.log
