@@ -1,6 +1,6 @@
 # Wristly
 
-Apple Watch 上的私人 AI 聊天客户端。原生 SwiftUI，最低 **watchOS 27.0**；Cloudflare Workers 后端；OpenAI-compatible Chat Completions 流、Brave Search 和火山引擎豆包流式语音识别。
+Apple Watch 上的私人 AI 聊天客户端。原生 SwiftUI，最低 **watchOS 27.0**；Cloudflare Workers 后端；默认 DeepSeek，也支持其他 OpenAI-compatible Chat Completions 接口，搭配 Brave Search 和火山引擎豆包流式语音识别。
 
 第一版只做文字聊天、联网搜索、系统文字输入、豆包语音输入和当前会话。不包含 TTS、账号、付费、长期记忆或其他 Agent 工具。
 
@@ -33,9 +33,30 @@ npx wrangler login
 
 | 配置 | 含义 |
 | --- | --- |
-| `LLM_BASE_URL` | HTTPS API 根地址，默认 `https://api.openai.com/v1`；代码会追加 `/chat/completions` |
-| `LLM_MODEL` | 支持流与工具调用的模型 ID |
+| `LLM_BASE_URL` | HTTPS API 根地址，默认 `https://api.deepseek.com`；代码会追加 `/chat/completions` |
+| `LLM_MODEL` | 默认 `deepseek-flash`；可更换为支持流与工具调用的模型 ID |
 | `ASR_RESOURCE_ID` | 豆包已开通的资源 ID，默认按时长计费 `volc.bigasr.sauc.duration`；必须与实际授权一致 |
+
+DeepSeek 官方主机使用 `thinking: { type: "disabled" }` 非思考模式，适合 Watch 的短回答，并让搜索后的工具结果可以直接继续生成。其他兼容接口不发送这个 DeepSeek 专用参数。当前模型名称与参数参考 [DeepSeek 官方快速开始](https://api-docs.deepseek.com/quick_start) 和 [Chat Completions 文档](https://api-docs.deepseek.com/api/create-chat-completion)。
+
+### Cloudflare 网页配置：先让文字聊天可用
+
+进入 `Workers & Pages → wristly → Settings → Variables and Secrets`。这里配置的是 Worker 运行时使用的参数：普通变量（Variable）保存公开设置，秘密变量（Secret）保存密码或密钥。构建页面里的 `NODE_VERSION=24` 是另一处设置，仅用于安装和打包。
+
+先添加以下两个 **Secret**，保存并部署，即可开始测试 DeepSeek 文字聊天：
+
+| 名称 | 值从哪里来 |
+| --- | --- |
+| `LLM_API_KEY` | 在 [DeepSeek 开放平台](https://platform.deepseek.com/) 的 API Keys 页面创建；API 账户需有可用额度，不能用聊天网站的登录密码 |
+| `APP_ACCESS_TOKEN` | 自己用密码管理器生成的 64 位随机十六进制字符串，保存好，之后在手表上输入同一串值 |
+
+`LLM_BASE_URL` 与 `LLM_MODEL` 已由仓库中的 `wrangler.toml` 配好，不用再在网页重复填写。修改这两项时请改仓库，以免下次 Git 部署覆盖网页修改。
+
+另外三项可以等文字聊天跑通后再添加：
+
+- `SEARCH_API_KEY` 来自 Brave Search API，是给模型查网页用的服务，不需要安装 Brave 浏览器。没有它时仍可聊天，但不能联网搜索。
+- `ASR_APP_ID` 是在火山引擎控制台的语音服务里创建应用后获得的应用编号，**不是 Apple App ID、不是 Cloudflare Worker ID，也不是 Apple 开发者账号**。
+- `ASR_ACCESS_TOKEN` 是同一个火山引擎语音应用的访问凭据。需要开通并授权豆包流式语音识别资源。没有这两项时豆包语音入口不可用；系统文字输入仍可用，系统听写是否出现由 watchOS 决定。
 
 通过交互命令保存 Secrets，**不要把真实值写进代码、命令历史、GitHub 或客户端**：
 

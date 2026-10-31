@@ -59,6 +59,9 @@ export function chat(messages: Message[], env: Env, requestSignal: AbortSignal, 
           const response = await fetcher(url.toString(), {
             method: "POST", headers: { Authorization: `Bearer ${env.LLM_API_KEY}`, "Content-Type": "application/json" },
             body: JSON.stringify({ model: env.LLM_MODEL, messages: conversation, stream: true, max_tokens: 1800,
+              // DeepSeek defaults to thinking mode. Use its documented non-thinking
+              // mode for short Watch answers and the bounded tool round-trip.
+              ...(url.hostname === "api.deepseek.com" ? { thinking: { type: "disabled" } } : {}),
               ...(round === 0 && env.SEARCH_API_KEY ? { tools: [{ type: "function", function: {
                 name: "web_search", description: "搜索当前网页信息和来源", parameters: { type: "object", properties: { query: { type: "string" } }, required: ["query"], additionalProperties: false }
               } }], tool_choice: "auto", parallel_tool_calls: false } : {}) }),

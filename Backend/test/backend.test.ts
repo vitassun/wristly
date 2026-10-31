@@ -70,6 +70,7 @@ test("chat streams deltas and ends exactly once", async () => {
   const result = await events(chat([{ role: "user", content: "你好" }], env, new AbortController().signal,
     fetcher((_url, init) => {
       assert.equal((init?.headers as Record<string, string>).Authorization, "Bearer test-llm");
+      assert.equal(JSON.parse(String(init?.body)).thinking, undefined);
       return new Response(frames(delta("你好"), delta("！"), "[DONE]"));
     })));
   assert.deepEqual(result.map(e => e.name), ["delta", "delta", "done"]);
@@ -86,6 +87,9 @@ test("fragmented tool call searches once, returns sources, then streams grounded
     }
     models++;
     const input = JSON.parse(String(init?.body));
+    assert.equal(url, "https://api.deepseek.com/chat/completions");
+    assert.equal(input.model, "deepseek-flash");
+    assert.deepEqual(input.thinking, { type: "disabled" });
     if (models === 1) return new Response(frames(
       { choices: [{ delta: { tool_calls: [{ index: 0, id: "call_1", function: { name: "web_search", arguments: '{"query":"今日' } }] } }] },
       { choices: [{ delta: { tool_calls: [{ index: 0, function: { arguments: '新闻"}' } }] } }] }, "[DONE]"));
@@ -94,7 +98,7 @@ test("fragmented tool call searches once, returns sources, then streams grounded
     assert.match(input.messages.at(-1).content, /news.example/);
     return new Response(frames(delta("根据[来源](https://news.example/1)…"), "[DONE]"));
   });
-  const result = await events(chat([{ role: "user", content: "今天有什么新闻" }], env, new AbortController().signal, mock));
+  const result = await events(chat([{ role: "user", content: "今天有什么新闻" }], { ...env, LLM_BASE_URL: "https://api.deepseek.com", LLM_MODEL: "deepseek-flash" }, new AbortController().signal, mock));
   assert.equal(models, 2); assert.equal(searches, 1);
   assert.deepEqual(result.map(e => e.name), ["status", "sources", "delta", "done"]);
   assert.equal(result[1].data.sources.length, 1);
