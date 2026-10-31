@@ -18,7 +18,7 @@ export function asrConnection(env: Env): { url: string; headers: Record<string, 
 export async function asr(env: Env): Promise<Response> {
   const config = asrConnection(env);
   const response = await fetch(config.url, {
-    headers: config.headers, signal: AbortSignal.timeout(10_000), redirect: "error"
+    headers: config.headers, signal: AbortSignal.timeout(10_000), redirect: "manual"
   });
   const upstream = response.webSocket;
   if (response.status !== 101 || !upstream) throw new APIError(502, "无法连接豆包语音服务，请检查后端配置");
