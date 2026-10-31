@@ -1,5 +1,9 @@
 # MVP 验证记录
 
+部署后文字聊天检查发现：`/health` 返回 200，但有效聊天请求只返回通用 SSE 错误。在本地真实 workerd 中重现并确认，模型、搜索和语音请求使用的 `redirect: "error"` 不受 Workers 支持，抛出 TypeError，模型请求尚未发出。
+
+修复改为 `redirect: "manual"`，继续通过 HTTP 状态/语音 101 状态判断成功，拒绝跟随重定向。新增 4 项 workerd 运行时回归测试，执行部署 bundle，覆盖文字回答、Tavily 工具往返、模型重定向拒绝、搜索重定向拒绝；本地全部通过，并加入 CI。测试使用隔离服务，无真实 API Key。线上文字聊天需部署此修复后再次验证；豆包语音按用户要求暂缓真实联调。
+
 后续配置调整（PR #2）：默认 DeepSeek + Tavily；豆包改为一句话识别 2.0（`bigmodel_nostream`、`volc.seedasr.sauc.duration`），支持新控制台单个 `ASR_API_KEY`。按用户要求显式启用免私人令牌模式，保留全局限流；配置 `APP_ACCESS_TOKEN` 后仍要求私人鉴权。公开地址可被他人调用并消耗上游额度。
 
 该调整已在 Linux 上通过 TypeScript 检查、20 项后端测试及 Wrangler dry run；新增 Watch 请求测试覆盖免令牌与私人令牌两种请求方式。以下原始 MVP 的 CI 记录保留作历史证据，最新构建结果以 PR 检查为准。真实上游调用仍需用户配置密钥验证。

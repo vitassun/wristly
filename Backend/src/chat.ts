@@ -33,7 +33,7 @@ export async function search(query: string, env: Env, signal: AbortSignal, fetch
     method: "POST",
     headers: { Authorization: `Bearer ${env.SEARCH_API_KEY}`, "Content-Type": "application/json" },
     body: JSON.stringify({ query, search_depth: "basic", max_results: 5, include_answer: false, include_raw_content: false }),
-    signal: AbortSignal.any([signal, AbortSignal.timeout(12_000)]), redirect: "error"
+    signal: AbortSignal.any([signal, AbortSignal.timeout(12_000)]), redirect: "manual"
   });
   if (!response.ok) throw new APIError(502, "搜索服务暂不可用");
   const data = await response.json() as { results?: { title: string; url: string; content?: string }[] };
@@ -65,7 +65,7 @@ export function chat(messages: Message[], env: Env, requestSignal: AbortSignal, 
               ...(round === 0 && env.SEARCH_API_KEY ? { tools: [{ type: "function", function: {
                 name: "web_search", description: "搜索当前网页信息和来源", parameters: { type: "object", properties: { query: { type: "string" } }, required: ["query"], additionalProperties: false }
               } }], tool_choice: "auto", parallel_tool_calls: false } : {}) }),
-            signal, redirect: "error"
+            signal, redirect: "manual"
           });
           if (!response.ok || !response.body) throw new APIError(502, "模型服务暂不可用，请检查后端配置");
           let text = "", finished = false;
