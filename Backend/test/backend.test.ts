@@ -80,10 +80,12 @@ test("chat streams deltas and ends exactly once", async () => {
 test("fragmented tool call searches once, returns sources, then streams grounded answer", async () => {
   let models = 0, searches = 0;
   const mock = fetcher((url, init) => {
-    if (url.startsWith("https://api.search.brave.com")) {
+    if (url === "https://api.tavily.com/search") {
       searches++;
-      assert.equal(new URL(url).searchParams.get("q"), "今日新闻");
-      return Response.json({ web: { results: [{ title: "来源", url: "https://news.example/1", description: "摘要" }, { title: "bad", url: "javascript:alert(1)" }] } });
+      assert.equal(init?.method, "POST");
+      assert.equal((init?.headers as Record<string, string>).Authorization, "Bearer test-search");
+      assert.deepEqual(JSON.parse(String(init?.body)), { query: "今日新闻", search_depth: "basic", max_results: 5, include_answer: false, include_raw_content: false });
+      return Response.json({ results: [{ title: "来源", url: "https://news.example/1", content: "摘要" }, { title: "bad", url: "javascript:alert(1)" }] });
     }
     models++;
     const input = JSON.parse(String(init?.body));
@@ -102,6 +104,7 @@ test("fragmented tool call searches once, returns sources, then streams grounded
   assert.equal(models, 2); assert.equal(searches, 1);
   assert.deepEqual(result.map(e => e.name), ["status", "sources", "delta", "done"]);
   assert.equal(result[1].data.sources.length, 1);
+  assert.equal(result[1].data.sources[0].snippet, "摘要");
 });
 
 test("upstream HTTP errors and premature EOF produce error, never done", async () => {

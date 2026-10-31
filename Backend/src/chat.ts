@@ -29,16 +29,16 @@ export function history(input: unknown): Message[] {
 }
 
 export async function search(query: string, env: Env, signal: AbortSignal, fetcher: Fetcher = fetch): Promise<Source[]> {
-  const url = new URL("https://api.search.brave.com/res/v1/web/search");
-  url.searchParams.set("q", query); url.searchParams.set("count", "5");
-  const response = await fetcher(url.toString(), {
-    headers: { "X-Subscription-Token": env.SEARCH_API_KEY, Accept: "application/json" },
+  const response = await fetcher("https://api.tavily.com/search", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${env.SEARCH_API_KEY}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ query, search_depth: "basic", max_results: 5, include_answer: false, include_raw_content: false }),
     signal: AbortSignal.any([signal, AbortSignal.timeout(12_000)]), redirect: "error"
   });
   if (!response.ok) throw new APIError(502, "搜索服务暂不可用");
-  const data = await response.json() as { web?: { results?: { title: string; url: string; description?: string }[] } };
-  return (data.web?.results ?? []).slice(0, 5).filter(r => /^https?:\/\//i.test(r.url)).map(r => ({
-    title: String(r.title).slice(0, 200), url: r.url, snippet: String(r.description ?? "").slice(0, 1200)
+  const data = await response.json() as { results?: { title: string; url: string; content?: string }[] };
+  return (data.results ?? []).slice(0, 5).filter(r => /^https?:\/\//i.test(r.url)).map(r => ({
+    title: String(r.title).slice(0, 200), url: r.url, snippet: String(r.content ?? "").slice(0, 1200)
   }));
 }
 
