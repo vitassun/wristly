@@ -7,18 +7,32 @@ struct ChatEvent: Decodable {
 }
 
 struct ChatAPI {
-    // Use default configuration with caches/cookies disabled and waitsForConnectivity enabled
-    // for reliable watchOS Bluetooth/Wi-Fi/LTE handoff, avoiding HTTP/3 QUIC issues.
+    // Default configuration with caches/cookies disabled and fast failure (waitsForConnectivity = false)
+    // so watchOS never silently hangs for 100s when a route is stalled.
     private static let sharedSession: URLSession = {
         let config = URLSessionConfiguration.default
         config.urlCache = nil
         config.requestCachePolicy = .reloadIgnoringLocalCacheData
         config.httpCookieAcceptPolicy = .never
         config.httpShouldSetCookies = false
-        config.timeoutIntervalForRequest = 35
-        config.timeoutIntervalForResource = 100
-        config.waitsForConnectivity = true
+        config.timeoutIntervalForRequest = 25
+        config.timeoutIntervalForResource = 75
+        config.waitsForConnectivity = false
         config.httpMaximumConnectionsPerHost = 2
+        config.tlsMinimumSupportedProtocolVersion = .TLSv12
+        return URLSession(configuration: config)
+    }()
+
+    // Dedicated short-timeout session for 1-tap diagnostics (hard 10s cap).
+    private static let diagnosticSession: URLSession = {
+        let config = URLSessionConfiguration.default
+        config.urlCache = nil
+        config.requestCachePolicy = .reloadIgnoringLocalCacheData
+        config.httpCookieAcceptPolicy = .never
+        config.httpShouldSetCookies = false
+        config.timeoutIntervalForRequest = 8
+        config.timeoutIntervalForResource = 10
+        config.waitsForConnectivity = false
         config.tlsMinimumSupportedProtocolVersion = .TLSv12
         return URLSession(configuration: config)
     }()
@@ -40,13 +54,15 @@ struct ChatAPI {
         var request = connection.request("health")
         request.httpMethod = "GET"
         request.assumesHTTP3Capable = false
-        request.timeoutInterval = 15
         let url = request.url ?? connection.baseURL
+        let started = ContinuousClock.now
         do {
-            let (data, response) = try await Self.sharedSession.data(for: request)
+            let (data, response) = try await Self.diagnosticSession.data(for: request)
+            let ms = Int(started.duration(to: .now).components.seconds * 1000)
+                + Int(started.duration(to: .now).components.attoseconds / 1_000_000_000_000_000)
             guard let http = response as? HTTPURLResponse else { return "无效响应" }
-            let body = String(data: data.prefix(80), encoding: .utf8) ?? ""
-            return http.statusCode == 200 ? "连接成功 (200) \(body)" : "HTTP \(http.statusCode) \(body)"
+            let body = String(data: data.prefix(60), encoding: .utf8) ?? ""
+            return http.statusCode == 200 ? "连接成功 \(ms)ms \(body)" : "HTTP \(http.statusCode) \(body)"
         } catch {
             let primary = Self.describe(error, url: url)
             let probe = await probeApple()
@@ -58,9 +74,8 @@ struct ChatAPI {
         guard let url = URL(string: "https://www.apple.com/library/test/success.html") else { return "" }
         var req = URLRequest(url: url)
         req.assumesHTTP3Capable = false
-        req.timeoutInterval = 10
         do {
-            let (_, resp) = try await Self.sharedSession.data(for: req)
+            let (_, resp) = try await Self.diagnosticSession.data(for: req)
             let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
             return "Apple HTTPS 正常 (\(code))"
         } catch {

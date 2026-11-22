@@ -9,28 +9,53 @@ struct SettingsView: View {
 
     var body: some View {
         NavigationStack {
-            Form {
-                Section("后端连接") {
-                    TextField("https://…workers.dev", text: $settings.endpoint)
-                        .textInputAutocapitalization(.never).autocorrectionDisabled()
-                    SecureField("访问令牌（可选）", text: $settings.token)
-                        .textInputAutocapitalization(.never).autocorrectionDisabled()
-                    Text("默认只需填写后端地址。启用私人令牌时再填写，令牌保存在本机钥匙串。")
-                        .font(.footnote).foregroundStyle(.secondary)
+            List {
+                Section("后端地址") {
+                    TextField("https://…", text: $settings.endpoint)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                    SecureField("访问令牌（可留空）", text: $settings.token)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
                 }
-                if let error { Text(error).font(.footnote).foregroundStyle(.orange) }
+
+                if let error {
+                    Section {
+                        Text(error)
+                            .font(.caption2)
+                            .foregroundStyle(.orange)
+                    }
+                }
+
                 if let diagnostic {
-                    Text(diagnostic)
-                        .font(.caption2)
-                        .foregroundStyle(diagnostic.hasPrefix("连接成功") ? .green : .orange)
+                    Section("连接诊断") {
+                        Text(diagnostic)
+                            .font(.caption2)
+                            .foregroundStyle(diagnostic.hasPrefix("连接成功") ? .green : .orange)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
-                Button("保存") {
-                    do { try settings.save(); dismiss() } catch { self.error = error.localizedDescription }
+
+                Section {
+                    Button {
+                        do { try settings.save(); dismiss() } catch { self.error = error.localizedDescription }
+                    } label: {
+                        Label("保存", systemImage: "checkmark")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .tint(.accentColor)
+
+                    Button {
+                        runHealthTest()
+                    } label: {
+                        Label(testing ? "测试中（≤10秒）…" : "测试连接", systemImage: "network")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .disabled(testing)
                 }
-                Button(testing ? "正在测试…" : "测试连接") {
-                    runHealthTest()
-                }.disabled(testing)
-            }.navigationTitle("连接")
+            }
+            .navigationTitle("连接")
+            .navigationBarTitleDisplayMode(.inline)
         }
     }
 

@@ -3,7 +3,6 @@ import SwiftUI
 struct ChatView: View {
     @EnvironmentObject private var settings: SettingsStore
     @StateObject private var chat = ChatStore()
-    @State private var draft = ""
     @State private var showSettings = false
     @State private var showVoice = false
     @State private var confirmNew = false
@@ -12,97 +11,228 @@ struct ChatView: View {
     var body: some View {
         ScrollViewReader { reader in
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 14) {
+                LazyVStack(alignment: .leading, spacing: 12) {
                     if chat.messages.isEmpty {
-                        VStack(alignment: .leading, spacing: 8) {
-                            Image(systemName: "sparkle").font(.title2).foregroundStyle(.tint)
-                            Text("有什么想问的？").font(.headline)
-                            Text("打字或说一句，开始聊天。")
-                                .font(.footnote).foregroundStyle(.secondary)
-                        }.padding(.vertical, 12)
-                    }
-                    ForEach(chat.messages) { message in MessageView(message: message).equatable() }
-                    if chat.busy {
-                        HStack(spacing: 6) {
-                            ProgressView().controlSize(.mini)
-                            Text(chat.status.isEmpty ? "正在回答…" : chat.status).font(.caption2)
-                        }.foregroundStyle(.secondary)
-                        Button("停止回答", systemImage: "stop.fill") { chat.stop() }.font(.footnote)
-                    }
-                    if let error = chat.error {
-                        Text(error).font(.footnote).foregroundStyle(.orange)
-                        if chat.messages.last?.state == .failed {
-                            Button("重试", systemImage: "arrow.clockwise") { chat.retry(settings: settings) }.disabled(chat.busy)
+                        emptyState
+                    } else {
+                        ForEach(chat.messages) { message in
+                            MessageView(message: message).equatable()
                         }
                     }
-                    Color.clear.frame(height: 1).id("bottom")
-                }.padding(.horizontal, 2)
+
+                    if chat.busy {
+                        streamingControls
+                    }
+
+                    if let error = chat.error {
+                        errorCard(error)
+                    }
+
+                    if !chat.busy {
+                        inputRow
+                            .padding(.top, chat.messages.isEmpty ? 4 : 8)
+                    }
+
+                    Color.clear.frame(height: 16).id("bottom")
+                }
+                .padding(.horizontal, 6)
+                .padding(.top, 4)
             }
-            // Follow new turns, allowing the user to scroll freely during a long answer.
-            .onChange(of: chat.messages.count) { _, _ in reader.scrollTo("bottom", anchor: .bottom) }
+            .background(Color.black)
+            .onChange(of: chat.messages.count) { _, _ in
+                withAnimation(.easeOut(duration: 0.2)) {
+                    reader.scrollTo("bottom", anchor: .bottom)
+                }
+            }
+            .onChange(of: chat.error) { _, newValue in
+                if newValue != nil {
+                    withAnimation(.easeOut(duration: 0.2)) {
+                        reader.scrollTo("bottom", anchor: .bottom)
+                    }
+                }
+            }
         }
         .navigationTitle("Wristly")
-        .safeAreaInset(edge: .bottom) {
-            HStack(spacing: 6) {
-                TextField("问点什么", text: $draft).submitLabel(.send).onSubmit(send)
-                Button(action: send) { Image(systemName: "arrow.up.circle.fill") }
-                    .buttonStyle(.plain).font(.title3).accessibilityLabel("发送")
-                    .disabled(chat.busy || draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                Button { showVoice = true } label: { Image(systemName: "mic.fill") }
-                    .buttonStyle(.plain).accessibilityLabel("豆包语音输入").disabled(chat.busy)
-            }
-            .padding(8).background(Color(white: 0.14), in: RoundedRectangle(cornerRadius: 18))
-        }
-        .background(Color.black)
+        .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {
-                Button { confirmNew = true } label: { Image(systemName: "square.and.pencil") }.accessibilityLabel("新对话")
+                Button { confirmNew = true } label: {
+                    Image(systemName: "square.and.pencil")
+                }
+                .accessibilityLabel("新对话")
+                .disabled(chat.messages.isEmpty && !chat.busy)
             }
             ToolbarItem(placement: .topBarTrailing) {
-                Button { showSettings = true } label: { Image(systemName: "gearshape") }.accessibilityLabel("连接设置")
+                Button { showSettings = true } label: {
+                    Image(systemName: "gearshape")
+                }
+                .accessibilityLabel("连接设置")
             }
         }
         .confirmationDialog("清空当前对话？", isPresented: $confirmNew, titleVisibility: .visible) {
-            Button("新建对话", role: .destructive) { chat.newConversation(); draft = "" }
+            Button("新建对话", role: .destructive) { chat.newConversation() }
         }
         .sheet(isPresented: $showSettings) { SettingsView().environmentObject(settings) }
-        .sheet(isPresented: $showVoice) { VoiceView { draft = $0 }.environmentObject(settings) }
+        .sheet(isPresented: $showVoice) {
+            VoiceView { text in
+                chat.send(text, settings: settings)
+            }.environmentObject(settings)
+        }
         .onChange(of: scenePhase) { _, phase in if phase == .background { chat.stop() } }
         .onAppear { if (try? settings.connection()) == nil { showSettings = true } }
     }
-    private func send() {
-        guard !chat.busy else { return }
-        let originalCount = chat.messages.count
-        chat.send(draft, settings: settings)
-        if chat.messages.count > originalCount { draft = "" }
+
+    private var emptyState: some View {
+        VStack(spacing: 6) {
+            Image(systemName: "sparkle")
+                .font(.title2)
+                .foregroundStyle(.tint)
+            Text("有什么想问的？")
+                .font(.headline)
+            Text("打字或语音，直接开聊")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.top, 14)
+        .padding(.bottom, 8)
+    }
+
+    private var streamingControls: some View {
+        HStack(spacing: 8) {
+            ProgressView().controlSize(.mini)
+            Text(chat.status.isEmpty ? "正在回答…" : chat.status)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+            Spacer(minLength: 4)
+            Button {
+                chat.stop()
+            } label: {
+                Label("停止", systemImage: "stop.fill")
+                    .font(.caption2.weight(.medium))
+            }
+            .buttonStyle(.bordered)
+            .tint(.red)
+            .controlSize(.mini)
+        }
+        .padding(.vertical, 4)
+    }
+
+    private func errorCard(_ message: String) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(message)
+                .font(.caption2)
+                .foregroundStyle(.orange)
+                .fixedSize(horizontal: false, vertical: true)
+            if chat.messages.last?.state == .failed {
+                Button {
+                    chat.retry(settings: settings)
+                } label: {
+                    Label("重试", systemImage: "arrow.clockwise")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+                .tint(.orange)
+                .controlSize(.small)
+                .disabled(chat.busy)
+            }
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.orange.opacity(0.14), in: RoundedRectangle(cornerRadius: 12))
+    }
+
+    private var inputRow: some View {
+        HStack(spacing: 8) {
+            TextFieldLink(prompt: Text("问点什么")) {
+                Label("提问", systemImage: "keyboard")
+                    .font(.footnote.weight(.medium))
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 10)
+                    .background(Color(white: 0.16), in: Capsule())
+            } onSubmit: { text in
+                chat.send(text, settings: settings)
+            }
+            .buttonStyle(.plain)
+
+            Button {
+                showVoice = true
+            } label: {
+                Image(systemName: "mic.fill")
+                    .font(.footnote.weight(.semibold))
+                    .frame(width: 40, height: 40)
+                    .background(Color.accentColor.opacity(0.24), in: Circle())
+                    .foregroundStyle(.tint)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("豆包语音输入")
+        }
     }
 }
 
 private struct MessageView: View, Equatable {
     let message: ChatMessage
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 5) {
-            Text(message.role == .user ? "你" : "Wristly")
-                .font(.caption2).foregroundStyle(message.role == .user ? Color.accentColor : .secondary)
-            if !message.content.isEmpty {
-                if message.role == .assistant && message.state != .streaming {
-                    // Parse inline Markdown only after streaming finishes to avoid O(N^2) CPU load.
-                    Text((try? AttributedString(markdown: message.content, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)))
-                         ?? AttributedString(message.content))
-                        .font(.body).fixedSize(horizontal: false, vertical: true)
-                } else {
-                    Text(message.content)
-                        .font(.body).fixedSize(horizontal: false, vertical: true)
+        if message.role == .user {
+            HStack {
+                Spacer(minLength: 18)
+                Text(message.content)
+                    .font(.callout)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 11)
+                    .padding(.vertical, 8)
+                    .background(Color.accentColor.opacity(0.26), in: RoundedRectangle(cornerRadius: 14))
+            }
+            .accessibilityElement(children: .combine)
+        } else {
+            VStack(alignment: .leading, spacing: 6) {
+                if !message.content.isEmpty {
+                    if message.state != .streaming {
+                        Text((try? AttributedString(markdown: message.content, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)))
+                             ?? AttributedString(message.content))
+                            .font(.body)
+                            .lineSpacing(2)
+                            .fixedSize(horizontal: false, vertical: true)
+                    } else {
+                        Text(message.content)
+                            .font(.body)
+                            .lineSpacing(2)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                if !message.sources.isEmpty {
+                    VStack(alignment: .leading, spacing: 4) {
+                        ForEach(message.sources) { source in
+                            if let url = source.safeURL {
+                                Link(destination: url) {
+                                    HStack(spacing: 5) {
+                                        Image(systemName: "globe")
+                                            .font(.caption2)
+                                            .foregroundStyle(.secondary)
+                                        Text(source.title)
+                                            .font(.caption2)
+                                            .lineLimit(1)
+                                    }
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 5)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .background(Color(white: 0.12), in: RoundedRectangle(cornerRadius: 8))
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                    }
+                    .padding(.top, 2)
+                }
+                if message.state == .failed && !message.content.isEmpty {
+                    Text("回答未完成")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
                 }
             }
-            ForEach(message.sources) { source in
-                if let url = source.safeURL { Link(source.title, destination: url).font(.caption2).lineLimit(2) }
-            }
-            if message.state == .failed { Text("回答未完成").font(.caption2).foregroundStyle(.secondary) }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .accessibilityElement(children: .contain)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(message.role == .user ? 10 : 0)
-        .background(message.role == .user ? Color.accentColor.opacity(0.16) : .clear, in: RoundedRectangle(cornerRadius: 12))
-        .accessibilityElement(children: .contain)
     }
 }

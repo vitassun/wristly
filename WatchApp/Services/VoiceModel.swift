@@ -16,7 +16,7 @@ final class VoiceModel: ObservableObject {
         config.httpShouldSetCookies = false
         config.timeoutIntervalForRequest = 15
         config.timeoutIntervalForResource = 80
-        config.waitsForConnectivity = true
+        config.waitsForConnectivity = false
         config.httpMaximumConnectionsPerHost = 1
         config.tlsMinimumSupportedProtocolVersion = .TLSv12
         return URLSession(configuration: config)
