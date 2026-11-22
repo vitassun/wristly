@@ -49,6 +49,18 @@ final class CoreTests: XCTestCase {
         XCTAssertNil(SourceLink(title: "x", url: "javascript:alert(1)", snippet: "").safeURL)
         XCTAssertNotNil(SourceLink(title: "x", url: "https://example.com", snippet: "").safeURL)
     }
+    func testSSEByteDecoderPreservesBlankLinesAndUTF8() throws {
+        let payload = ": keepalive\n\nevent: delta\ndata: {\"text\":\"你好\"}\n\nevent: done\ndata: {}\n\n"
+        var decoder = SSEByteDecoder()
+        var frames: [SSEFrame] = []
+        for byte in Data(payload.utf8) {
+            if let frame = try decoder.feed(byte) { frames.append(frame) }
+        }
+        XCTAssertEqual(frames, [
+            SSEFrame(event: "delta", data: "{\"text\":\"你好\"}"),
+            SSEFrame(event: "done", data: "{}")
+        ])
+    }
     func testPCMChunkerCoalescesAndFlushesTailWithoutLoss() {
         var chunker = PCMChunker(chunkSize: 100)
         XCTAssertTrue(chunker.append(Data(repeating: 1, count: 40)).isEmpty)

@@ -3,6 +3,7 @@ import SwiftUI
 struct ChatView: View {
     @EnvironmentObject private var settings: SettingsStore
     @StateObject private var chat = ChatStore()
+    @State private var draft = ""
     @State private var showSettings = false
     @State private var showVoice = false
     @State private var confirmNew = false
@@ -29,7 +30,7 @@ struct ChatView: View {
                     }
 
                     if !chat.busy {
-                        inputRow
+                        inputSection
                             .padding(.top, chat.messages.isEmpty ? 4 : 8)
                     }
 
@@ -70,7 +71,10 @@ struct ChatView: View {
             }
         }
         .confirmationDialog("清空当前对话？", isPresented: $confirmNew, titleVisibility: .visible) {
-            Button("新建对话", role: .destructive) { chat.newConversation() }
+            Button("新建对话", role: .destructive) {
+                chat.newConversation()
+                draft = ""
+            }
         }
         .sheet(isPresented: $showSettings) { SettingsView().environmentObject(settings) }
         .sheet(isPresented: $showVoice) {
@@ -80,6 +84,13 @@ struct ChatView: View {
         }
         .onChange(of: scenePhase) { _, phase in if phase == .background { chat.stop() } }
         .onAppear { if (try? settings.connection()) == nil { showSettings = true } }
+    }
+
+    private func sendDraft() {
+        guard !chat.busy else { return }
+        let originalCount = chat.messages.count
+        chat.send(draft, settings: settings)
+        if chat.messages.count > originalCount { draft = "" }
     }
 
     private var emptyState: some View {
@@ -142,30 +153,29 @@ struct ChatView: View {
         .background(Color.orange.opacity(0.14), in: RoundedRectangle(cornerRadius: 12))
     }
 
-    private var inputRow: some View {
-        HStack(spacing: 8) {
-            TextFieldLink(prompt: Text("问点什么")) {
-                Label("提问", systemImage: "keyboard")
-                    .font(.footnote.weight(.medium))
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 10)
-                    .background(Color(white: 0.16), in: Capsule())
-            } onSubmit: { text in
-                chat.send(text, settings: settings)
+    private var inputSection: some View {
+        VStack(spacing: 8) {
+            TextField("问点什么…", text: $draft)
+                .submitLabel(.send)
+                .onSubmit(sendDraft)
+
+            if !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                Button(action: sendDraft) {
+                    Label("发送", systemImage: "arrow.up.circle.fill")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
             }
-            .buttonStyle(.plain)
 
             Button {
                 showVoice = true
             } label: {
-                Image(systemName: "mic.fill")
-                    .font(.footnote.weight(.semibold))
-                    .frame(width: 40, height: 40)
-                    .background(Color.accentColor.opacity(0.24), in: Circle())
-                    .foregroundStyle(.tint)
+                Label("豆包语音", systemImage: "mic.fill")
+                    .font(.footnote.weight(.medium))
+                    .frame(maxWidth: .infinity)
             }
-            .buttonStyle(.plain)
-            .accessibilityLabel("豆包语音输入")
+            .buttonStyle(.bordered)
+            .tint(.accentColor)
         }
     }
 }

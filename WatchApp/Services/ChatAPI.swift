@@ -111,10 +111,10 @@ struct ChatAPI {
         guard http.value(forHTTPHeaderField: "Content-Type")?.hasPrefix("text/event-stream") == true else {
             throw ClientError.message("后端没有返回流式响应")
         }
-        var parser = SSEDecoder()
-        for try await line in bytes.lines {
+        var parser = SSEByteDecoder()
+        for try await byte in bytes {
             try Task.checkCancellation()
-            guard let frame = try parser.line(line) else { continue }
+            guard let frame = try parser.feed(byte) else { continue }
             let event = try JSONDecoder().decode(ChatEvent.self, from: Data(frame.data.utf8))
             if frame.event == "error" { throw ClientError.message(event.message ?? "回答中断") }
             await onEvent(frame.event, event)

@@ -30,11 +30,8 @@ struct VoiceView: View {
                     .padding(.top, 4)
 
                     if hasTranscript {
-                        Text(voice.transcript)
-                            .font(.callout)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(10)
-                            .background(Color(white: 0.14), in: RoundedRectangle(cornerRadius: 12))
+                        TextField("识别结果，点击可修改", text: $voice.transcript)
+                            .disabled(voice.busy)
                     }
 
                     if let error = voice.error {
@@ -66,25 +63,11 @@ struct VoiceView: View {
                             }
                             .buttonStyle(.borderedProminent)
 
-                            HStack(spacing: 8) {
-                                TextFieldLink(prompt: Text("编辑识别文字")) {
-                                    Text("修改")
-                                        .font(.caption)
-                                        .frame(maxWidth: .infinity)
-                                        .padding(.vertical, 8)
-                                        .background(Color(white: 0.16), in: Capsule())
-                                } onSubmit: { edited in
-                                    let trimmed = edited.trimmingCharacters(in: .whitespacesAndNewlines)
-                                    if !trimmed.isEmpty { voice.transcript = trimmed }
-                                }
-                                .buttonStyle(.plain)
-
-                                Button("重录") {
-                                    voice.start(settings: settings)
-                                }
-                                .font(.caption)
-                                .buttonStyle(.bordered)
+                            Button("重录") {
+                                voice.start(settings: settings)
                             }
+                            .font(.footnote)
+                            .buttonStyle(.bordered)
                         } else {
                             Button {
                                 voice.start(settings: settings)

@@ -29,6 +29,27 @@ struct SSEDecoder {
     }
 }
 
+// Byte-level SSE parser: preserves blank lines (\n\n) that Foundation's AsyncBytes.lines skips.
+struct SSEByteDecoder {
+    private var lineBuffer: [UInt8] = []
+    private var lineDecoder = SSEDecoder()
+
+    init() {
+        lineBuffer.reserveCapacity(256)
+    }
+
+    mutating func feed(_ byte: UInt8) throws -> SSEFrame? {
+        if byte == 0x0A {
+            let line = String(decoding: lineBuffer, as: UTF8.self)
+            lineBuffer.removeAll(keepingCapacity: true)
+            return try lineDecoder.line(line)
+        }
+        lineBuffer.append(byte)
+        guard lineBuffer.count < 512_000 else { throw ClientError.message("服务器响应过大") }
+        return nil
+    }
+}
+
 enum ClientError: LocalizedError {
     case message(String)
     var errorDescription: String? {
