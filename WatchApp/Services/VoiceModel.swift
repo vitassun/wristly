@@ -9,11 +9,16 @@ final class VoiceModel: ObservableObject {
     @Published private(set) var busy = false
     @Published private(set) var error: String?
     private static let sharedSession: URLSession = {
-        let config = URLSessionConfiguration.ephemeral
+        let config = URLSessionConfiguration.default
+        config.urlCache = nil
+        config.requestCachePolicy = .reloadIgnoringLocalCacheData
+        config.httpCookieAcceptPolicy = .never
+        config.httpShouldSetCookies = false
         config.timeoutIntervalForRequest = 15
         config.timeoutIntervalForResource = 80
-        config.waitsForConnectivity = false
+        config.waitsForConnectivity = true
         config.httpMaximumConnectionsPerHost = 1
+        config.tlsMinimumSupportedProtocolVersion = .TLSv12
         return URLSession(configuration: config)
     }()
 
@@ -38,7 +43,9 @@ final class VoiceModel: ObservableObject {
                 try Task.checkCancellation()
                 guard self.generation == generation else { return }
                 guard allowed else { throw ClientError.message("请在系统设置中允许 Wristly 使用麦克风") }
-                let socket = Self.sharedSession.webSocketTask(with: connection.request("asr", websocket: true))
+                var request = connection.request("asr", websocket: true)
+                request.assumesHTTP3Capable = false
+                let socket = Self.sharedSession.webSocketTask(with: request)
                 self.socket = socket; socket.resume()
                 deadline = Task { [weak self] in
                     do { try await Task.sleep(for: .seconds(75)) } catch { return }
