@@ -49,4 +49,15 @@ final class CoreTests: XCTestCase {
         XCTAssertNil(SourceLink(title: "x", url: "javascript:alert(1)", snippet: "").safeURL)
         XCTAssertNotNil(SourceLink(title: "x", url: "https://example.com", snippet: "").safeURL)
     }
+    func testPCMChunkerCoalescesAndFlushesTailWithoutLoss() {
+        var chunker = PCMChunker(chunkSize: 100)
+        XCTAssertTrue(chunker.append(Data(repeating: 1, count: 40)).isEmpty)
+        let emitted = chunker.append(Data(repeating: 2, count: 80))
+        XCTAssertEqual(emitted.count, 1)
+        XCTAssertEqual(emitted[0].count, 100)
+        XCTAssertEqual(emitted[0].count % 2, 0)
+        let tail = chunker.flush()
+        XCTAssertEqual(tail?.count, 20)
+        XCTAssertNil(chunker.flush())
+    }
 }

@@ -7,6 +7,17 @@ struct ChatEvent: Decodable {
 }
 
 struct ChatAPI {
+    // Reuse a single ephemeral URLSession to preserve TLS/HTTP2 connections across turns
+    // and avoid repeated radio handshakes without writing caches or cookies to disk.
+    private static let sharedSession: URLSession = {
+        let config = URLSessionConfiguration.ephemeral
+        config.timeoutIntervalForRequest = 35
+        config.timeoutIntervalForResource = 100
+        config.waitsForConnectivity = false
+        config.httpMaximumConnectionsPerHost = 2
+        return URLSession(configuration: config)
+    }()
+
     func stream(connection: Connection, messages: [WireMessage],
                 onEvent: @MainActor (String, ChatEvent) -> Void) async throws {
         var request = connection.request("chat")
@@ -14,12 +25,7 @@ struct ChatAPI {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
         request.httpBody = try JSONEncoder().encode(["messages": messages])
-        let config = URLSessionConfiguration.ephemeral
-        config.timeoutIntervalForRequest = 30
-        config.timeoutIntervalForResource = 100
-        let session = URLSession(configuration: config)
-        defer { session.invalidateAndCancel() }
-        let (bytes, response) = try await session.bytes(for: request)
+        let (bytes, response) = try await Self.sharedSession.bytes(for: request)
         guard let http = response as? HTTPURLResponse else { throw ClientError.message("无效的服务器响应") }
         guard http.statusCode == 200 else {
             switch http.statusCode {
