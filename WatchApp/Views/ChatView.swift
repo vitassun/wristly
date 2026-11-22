@@ -21,7 +21,7 @@ struct ChatView: View {
                                 .font(.footnote).foregroundStyle(.secondary)
                         }.padding(.vertical, 12)
                     }
-                    ForEach(chat.messages) { message in MessageView(message: message) }
+                    ForEach(chat.messages) { message in MessageView(message: message).equatable() }
                     if chat.busy {
                         HStack(spacing: 6) {
                             ProgressView().controlSize(.mini)
@@ -51,8 +51,9 @@ struct ChatView: View {
                 Button { showVoice = true } label: { Image(systemName: "mic.fill") }
                     .buttonStyle(.plain).accessibilityLabel("豆包语音输入").disabled(chat.busy)
             }
-            .padding(8).background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18))
+            .padding(8).background(Color(white: 0.14), in: RoundedRectangle(cornerRadius: 18))
         }
+        .background(Color.black)
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {
                 Button { confirmNew = true } label: { Image(systemName: "square.and.pencil") }.accessibilityLabel("新对话")
@@ -77,17 +78,22 @@ struct ChatView: View {
     }
 }
 
-private struct MessageView: View {
+private struct MessageView: View, Equatable {
     let message: ChatMessage
     var body: some View {
         VStack(alignment: .leading, spacing: 5) {
             Text(message.role == .user ? "你" : "Wristly")
                 .font(.caption2).foregroundStyle(message.role == .user ? Color.accentColor : .secondary)
             if !message.content.isEmpty {
-                // Inline Markdown supports emphasis, code and links; preserve paragraph breaks.
-                Text((try? AttributedString(markdown: message.content, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)))
-                     ?? AttributedString(message.content))
-                    .font(.body).fixedSize(horizontal: false, vertical: true)
+                if message.role == .assistant && message.state != .streaming {
+                    // Parse inline Markdown only after streaming finishes to avoid O(N^2) CPU load.
+                    Text((try? AttributedString(markdown: message.content, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)))
+                         ?? AttributedString(message.content))
+                        .font(.body).fixedSize(horizontal: false, vertical: true)
+                } else {
+                    Text(message.content)
+                        .font(.body).fixedSize(horizontal: false, vertical: true)
+                }
             }
             ForEach(message.sources) { source in
                 if let url = source.safeURL { Link(source.title, destination: url).font(.caption2).lineLimit(2) }
@@ -96,7 +102,7 @@ private struct MessageView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(message.role == .user ? 10 : 0)
-        .background(message.role == .user ? Color.accentColor.opacity(0.12) : .clear, in: RoundedRectangle(cornerRadius: 12))
+        .background(message.role == .user ? Color.accentColor.opacity(0.16) : .clear, in: RoundedRectangle(cornerRadius: 12))
         .accessibilityElement(children: .contain)
     }
 }

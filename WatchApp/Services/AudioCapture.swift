@@ -1,10 +1,12 @@
 @preconcurrency import AVFoundation
 import Foundation
 
-// The tap runs on AVAudioEngine's audio thread. Conversion stays on that thread;
-// the bounded stream transfers owned PCM bytes to the network task.
+// The tap runs on AVAudioEngine's audio thread. Conversion and PCM coalescing stay on
+// that thread so the Watch radio transmits ~240ms frames instead of 20-40ms micro-packets.
 final class AudioCapture: @unchecked Sendable {
     private let engine = AVAudioEngine()
+    private let lock = NSLock()
+    private var chunker = PCMChunker()
     private var continuation: AsyncThrowingStream<Data, Error>.Continuation?
     private var tapped = false
 
@@ -19,9 +21,11 @@ final class AudioCapture: @unchecked Sendable {
               let converter = AVAudioConverter(from: input, to: output) else {
             throw ClientError.message("麦克风当前不可用")
         }
-        let (stream, sink) = AsyncThrowingStream<Data, Error>.makeStream(bufferingPolicy: .bufferingNewest(20))
+        lock.withLock { chunker = PCMChunker() }
+        let (stream, sink) = AsyncThrowingStream<Data, Error>.makeStream(bufferingPolicy: .bufferingNewest(12))
         continuation = sink
-        node.installTap(onBus: 0, bufferSize: 4_800, format: input) { buffer, _ in
+        node.installTap(onBus: 0, bufferSize: 4_800, format: input) { [weak self] buffer, _ in
+            guard let self else { return }
             let capacity = AVAudioFrameCount(ceil(Double(buffer.frameLength) * 16_000 / input.sampleRate)) + 32
             guard let pcm = AVAudioPCMBuffer(pcmFormat: output, frameCapacity: capacity) else { return }
             var supplied = false
@@ -33,8 +37,12 @@ final class AudioCapture: @unchecked Sendable {
             if let error { sink.finish(throwing: error); return }
             guard pcm.frameLength > 0, let samples = pcm.int16ChannelData?[0] else { return }
             let data = Data(bytes: samples, count: Int(pcm.frameLength) * MemoryLayout<Int16>.size)
-            if case .dropped = sink.yield(data) {
-                sink.finish(throwing: ClientError.message("语音上传速度不足，请在网络稳定时重试"))
+            let chunks = self.lock.withLock { self.chunker.append(data) }
+            for chunk in chunks {
+                if case .dropped = sink.yield(chunk) {
+                    sink.finish(throwing: ClientError.message("语音上传速度不足，请在网络稳定时重试"))
+                    return
+                }
             }
         }
         tapped = true
@@ -46,6 +54,8 @@ final class AudioCapture: @unchecked Sendable {
     func stop() {
         engine.stop()
         if tapped { engine.inputNode.removeTap(onBus: 0); tapped = false }
+        let remainder = lock.withLock { chunker.flush() }
+        if let remainder { _ = continuation?.yield(remainder) }
         continuation?.finish(); continuation = nil
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
     }

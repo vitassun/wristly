@@ -71,7 +71,9 @@ test("chat streams deltas and ends exactly once", async () => {
   const result = await events(chat([{ role: "user", content: "你好" }], env, new AbortController().signal,
     fetcher((_url, init) => {
       assert.equal((init?.headers as Record<string, string>).Authorization, "Bearer test-llm");
-      assert.equal(JSON.parse(String(init?.body)).thinking, undefined);
+      const payload = JSON.parse(String(init?.body));
+      assert.equal(payload.thinking, undefined);
+      assert.equal(payload.max_tokens, 600);
       return new Response(frames(delta("你好"), delta("！"), "[DONE]"));
     })));
   assert.deepEqual(result.map(e => e.name), ["delta", "delta", "done"]);

@@ -8,9 +8,17 @@ final class VoiceModel: ObservableObject {
     @Published private(set) var recording = false
     @Published private(set) var busy = false
     @Published private(set) var error: String?
+    private static let sharedSession: URLSession = {
+        let config = URLSessionConfiguration.ephemeral
+        config.timeoutIntervalForRequest = 15
+        config.timeoutIntervalForResource = 80
+        config.waitsForConnectivity = false
+        config.httpMaximumConnectionsPerHost = 1
+        return URLSession(configuration: config)
+    }()
+
     private var capture: AudioCapture?
     private var socket: URLSessionWebSocketTask?
-    private var session: URLSession?
     private var task: Task<Void, Never>?
     private var sender: Task<Void, Error>?
     private var deadline: Task<Void, Never>?
@@ -30,12 +38,7 @@ final class VoiceModel: ObservableObject {
                 try Task.checkCancellation()
                 guard self.generation == generation else { return }
                 guard allowed else { throw ClientError.message("请在系统设置中允许 Wristly 使用麦克风") }
-                let config = URLSessionConfiguration.ephemeral
-                config.timeoutIntervalForRequest = 15
-                config.timeoutIntervalForResource = 80
-                let session = URLSession(configuration: config)
-                self.session = session
-                let socket = session.webSocketTask(with: connection.request("asr", websocket: true))
+                let socket = Self.sharedSession.webSocketTask(with: connection.request("asr", websocket: true))
                 self.socket = socket; socket.resume()
                 deadline = Task { [weak self] in
                     do { try await Task.sleep(for: .seconds(75)) } catch { return }
@@ -108,7 +111,6 @@ final class VoiceModel: ObservableObject {
         capture?.stop(); capture = nil
         sender?.cancel(); sender = nil
         socket?.cancel(with: .normalClosure, reason: nil); socket = nil
-        session?.invalidateAndCancel(); session = nil
         deadline?.cancel(); deadline = nil
         recording = false; busy = false
     }

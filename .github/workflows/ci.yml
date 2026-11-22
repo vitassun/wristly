@@ -52,8 +52,14 @@ jobs:
       - uses: actions/checkout@v4
       - name: Install XcodeGen
         run: command -v xcodegen || brew install xcodegen
-      - name: Core tests and unsigned watchOS simulator build
+      - name: Core tests, watchOS simulator build, and unsigned companion IPA
         run: bash scripts/build-watch.sh
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: Wristly-unsigned-ipa
+          path: build/Wristly-unsigned.ipa
+          retention-days: 30
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -61,6 +67,7 @@ jobs:
           path: |
             build/*.log
             build/*.zip
+            build/*.ipa
             build/*.xcresult
             Wristly.xcodeproj/
           retention-days: 7

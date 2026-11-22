@@ -7,12 +7,13 @@ Apple Watch 上的私人 AI 聊天客户端。原生 SwiftUI，最低 **watchOS 
 ## 目录与工作方式
 
 ```text
-WatchApp/          SwiftUI App、PCM 录音、Keychain、流式网络、本地会话
+CompanionApp/      极简 iOS 宿主壳（零后台/零 WCSession，用于伴侣侧载与分发）
+WatchApp/          SwiftUI Watch App、PCM 攒包录音、Keychain、复用流式网络、本地会话
 Backend/           TypeScript Worker、SSE、搜索、豆包 WebSocket、限流 DO
 Tests/             可独立运行的 Swift 核心逻辑测试
-project.yml        XcodeGen 项目定义（生成 Wristly.xcodeproj）
-scripts/           SDK 检查和无需签名的构建脚本
-.github/workflows/ Push / Pull Request / 手动 CI
+project.yml        XcodeGen 项目定义（生成含 iOS 宿主 + Watch App 的 Wristly.xcodeproj）
+scripts/           SDK 检查、无签名模拟器构建与 WatchBridge 可用 .ipa 打包脚本
+.github/workflows/ Push / Pull Request / 手动 CI（自动产出 Wristly-unsigned-ipa）
 ```
 
 手表通过 HTTPS `/chat` 接收 SSE，通过 WSS `/asr` 将 16 kHz、16 bit、小端单声道 PCM 实时发往 Worker，Worker 转发到豆包官方一句话识别 2.0 接口。结束录音后返回整段识别结果，不要求边录边出字。识别文本不会自动发送给模型，需要在手表确认或编辑后再发送。系统文字输入同时使用 watchOS 提供的键盘、听写等能力，具体可用方式由设备、语言和系统决定。
@@ -93,7 +94,14 @@ open Wristly.xcodeproj
 bash scripts/build-watch.sh
 ```
 
-项目定义生成的是独立 watchOS App，无需 iPhone companion。首次打开时，在“连接”页面输入 Worker HTTPS 根地址，私人令牌默认留空；如后端启用了私人鉴权再填写。可选令牌存在本机 Keychain，地址存在 UserDefaults。模型、搜索和语音 API Key 永远不进入 App。
+项目定义生成的是 **极简 iOS 宿主壳 + 可独立运行的 watchOS App**（`WKRunsIndependentlyOfCompanionApp = true`）：iOS 宿主不包含后台任务或常驻 `WatchConnectivity` 同步，平时无需打开；手表端独立联网运行。首次打开时，在“连接”页面输入 Worker HTTPS 根地址，私人令牌默认留空；如后端启用了私人鉴权再填写。可选令牌存在本机 Keychain，地址存在 UserDefaults。模型、搜索和语音 API Key 永远不进入 App。
+
+### 轻量化与省电设计
+
+- **流式 UI 合批与单次 Markdown 解析**：SSE 文本首字立即渲染，后续按 ~100ms 合并刷屏；流式阶段纯文本显示，回答完成后才解析一次 Markdown，避免主线程 O(N²) CPU 飙升。
+- **连接复用与低射频唤醒**：复用无磁盘缓存的 `.ephemeral` `URLSession`（减少重复 TCP/TLS 握手）；PCM 音频攒满 ~240ms（7,680 字节）再发帧，显著降低蓝牙/Wi-Fi 发包频率；后端 SSE 心跳仅在空闲 ≥20 秒时触发。
+- **OLED 纯黑与短答省屏**：移除输入栏实时毛玻璃模糊改用纯黑/暗灰底色，默认 `max_tokens = 600` 引导短答以缩短抬腕亮屏时长。
+- **零伴侣耗电与小体积**：本机会话保留上限 30 条并在后台低优先级队列写盘；Release 构建启用 `-Osize` 与死代码剥离；零第三方 Swift 依赖。
 
 文字输入后点击发送；麦克风入口打开语音页，点击开始录音、结束录音，再点“使用文字”回到输入框，确认后发送。录音最长 60 秒，取消、退到后台、音频中断都会释放麦克风和连接。失败可重录。模型生成可停止或重试，新建对话会取消旧请求并清除本机上下文。基础 Markdown 支持强调、行内代码和链接，保留换行；不提供完整表格或 HTML 排版。
 
@@ -102,8 +110,8 @@ bash scripts/build-watch.sh
 每次 Push 和 Pull Request 会运行：
 
 1. Ubuntu：`npm ci`、TypeScript 类型检查、Node 测试、Workers 部署 dry run；**不发布后端，不需要生产 Secrets**。
-2. 官方 `xcode-27` 预览 runner：选择 `/Applications/Xcode_27.app`，验证 watchOS Simulator SDK ≥ 27，执行 Swift 核心测试，生成 Xcode 项目，以 `CODE_SIGNING_ALLOWED=NO` 构建 watchOS Simulator App。
-3. 上传测试日志、SDK 信息、`.xcresult`、生成的项目和模拟器 `.app` zip。构建日志保留真实失败退出状态。
+2. 官方 `xcode-27` 预览 runner：选择 `/Applications/Xcode_27.app`，验证 iOS/watchOS SDK ≥ 27，执行 Swift 核心测试，生成 Xcode 项目，构建 watchOS Simulator App，并归档 Release 无签名伴侣包打包为 `Wristly-unsigned.ipa`（自动校验 `Watch/WristlyWatch.app` 及 Bundle ID 层级）。
+3. 上传独立的 `Wristly-unsigned-ipa` 产物（保留 30 天）以及 `watch-build-and-logs` 日志与模拟器产物。构建日志保留真实失败退出状态。
 
 GitHub 官方镜像说明：[Xcode 27 runner inventory](https://github.com/actions/runner-images/blob/main/images/macos/xcode-27-arm64-Readme.md)。预览 runner 的可用性由 GitHub 决定；若仓库无法使用，可在仓库 Actions Variables 设置 `WATCHOS_RUNNER` 为装有相同 Xcode 路径和 watchOS 27 SDK 的 runner 标签。没有兼容 SDK 时 CI 会报错，不降级验证。
 
@@ -126,12 +134,27 @@ npm run test:runtime
 
 - 仓库默认明确启用免令牌模式，适用于不想在手表填写私人令牌的部署。地址可被他人调用并消耗上游额度。设置 `APP_ACCESS_TOKEN` 可恢复私人鉴权；配置后会拒绝缺失/过短/错误令牌。不会在 URL、日志或响应中传递密钥。
 - 持久化全局限流：20 次开始请求/分钟、300 次/UTC 日，聊天和 ASR 共用。私人部署可在 `RateLimiter` 中调整；令牌泄露时应在 Worker 和手表中同时轮换。此共享令牌适合私人使用，不是多用户账户系统。
-- 客户端最多保留当前会话 60 条消息，写入受系统文件保护的本机文件；新建对话覆盖为空。发送最近最多 24 条、合计 24,000 UTF-16 单元；单条最多 8,000。失败的 AI 半截回答不加入下一次上下文。后端再次验证、截断。
+- 客户端最多保留当前会话 30 条消息，在后台低优先级队列写入受系统文件保护的本机文件；新建对话覆盖为空。发送最近最多 24 条、合计 24,000 UTF-16 单元；单条最多 8,000。失败的 AI 半截回答不加入下一次上下文。后端再次验证、截断。
 - Workers 不保存聊天或音频；Durable Object 只存计数。上游模型、Tavily 和火山引擎仍会接收请求内容，保留政策以各服务条款为准。
 - Worker 限制请求体、模型轮数、回答长度、音频字节和超时；客户端取消会关闭语音或模型连接。后台运行不在 MVP 目标内。
 
-## 后续真机安装（本阶段不包含）
+## 真机安装
 
-在自己的 Mac 上生成并打开项目，选择 Apple Developer Team、修改 Bundle Identifier、配置 watchOS 签名和已配对的真机，再从 Xcode 安装。需要 watchOS 27+。模拟器产物不能直接安装到手表；分发需要单独的签名设备构建。本阶段未配置证书、Provisioning Profile、TestFlight 或自动真机部署。
+### 方式一：Windows 无 Mac 安装（使用 WatchBridge）
+
+适合只有 Windows 电脑与免费 Apple ID 的场景（需 iOS 27+、watchOS 27+）：
+
+1. 打开本仓库 GitHub Actions 最新通过的构建记录，下载 **`Wristly-unsigned-ipa`** 产物并解压得到 `Wristly-unsigned.ipa`。
+2. 在 Windows 上安装苹果官方驱动（Apple Devices 或非微软商店版 iTunes），并下载开源工具 **[WatchBridge](https://github.com/AdminZachary/WatchBridge)**。
+3. 用 USB 线将已配对 Apple Watch 的 iPhone 连接到 Windows，打开 WatchBridge：
+   - 按引导开启 iPhone 与 Apple Watch 的 **开发者模式（Developer Mode）**（手表侧需确认并重启）；
+   - 登录 Apple ID（建议使用备用免费 Apple ID），选择 `Wristly-unsigned.ipa`；
+   - WatchBridge 会自动校验并重签 iPhone 宿主与内置的 `Watch/WristlyWatch.app`，装入 iPhone 并推送到 Apple Watch。
+4. 在 iPhone「设置 → 通用 → VPN 与设备管理」中信任你的开发者证书。请勿卸载 iPhone 上的 Wristly 宿主壳（平时无需打开，不耗电）。
+5. **免费 Apple ID 说明**：签名有效期为 **7 天**，到期前通过 WatchBridge（支持同 Wi-Fi 续签）重新刷新即可。
+
+### 方式二：macOS + Xcode 27 直接安装
+
+在 Mac 上执行 `xcodegen generate && open Wristly.xcodeproj`，为 `Wristly` 和 `WristlyWatch` 两个 Target 选择你的 Apple Developer Team、按需修改 Bundle Identifier（保持 `Watch` ID 为 iOS ID 的子前缀），连接真机直接运行安装。
 
 真机验收需覆盖：中文/英文系统输入、麦克风权限拒绝、60 秒录音、取消、真实豆包最终识别、文字确认、模型连续追问、实时搜索与来源、断网、退后台、长回答滚动、新建对话后不继承上下文。上游凭证缺失前不能声称这些端到端验收已通过。
